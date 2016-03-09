@@ -1,8 +1,9 @@
-#![feature(question_mark)]
+#![feature(question_mark,test)]
 extern crate byteorder;
+extern crate test;
 
 use std::fs::{File};
-use std::io::{self,Seek,SeekFrom};
+use std::io::{self,Seek,SeekFrom,Cursor,Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -38,7 +39,15 @@ pub struct WaveInfo {
 pub struct WaveFile {
   file:          File,
   info:          WaveInfo,
-  current_frame: u32
+  current_frame: u32,
+  data:          Vec<u8>
+}
+
+#[derive(Debug)]
+pub struct WaveFileIntoIter {
+  info:            WaveInfo,
+  bytes_per_frame: usize,
+  cursor:          Cursor<Vec<u8>>
 }
 
 #[derive(Debug,PartialEq)]
@@ -63,20 +72,36 @@ impl From<byteorder::Error> for WavError {
   }
 }
 
-impl Iterator for WaveFile {
+impl IntoIterator for WaveFile {
+  type Item = Frame;
+  type IntoIter = WaveFileIntoIter;
+
+  fn into_iter(self) -> Self::IntoIter {
+    let bytes_per_frame = self.info.channels as usize * self.info.bits_per_sample as usize / 8;
+    let cursor = Cursor::new(self.data);
+    WaveFileIntoIter {
+      info:            self.info,
+      bytes_per_frame: bytes_per_frame,
+      cursor:          cursor
+    }
+  }
+}
+
+impl Iterator for WaveFileIntoIter {
   type Item = Frame;
 
   fn next(&mut self) -> Option<Frame> {
-    if self.current_frame >= self.info.total_frames {
+    if self.cursor.position() as usize >= self.cursor.get_ref().len() {
       return None;
     }
-    let bytes_per_sample = (self.info.bits_per_sample as usize) / 8;
+
+    let bytes_per_sample = self.bytes_per_frame / self.info.channels as usize;
     let mut samples : Vec<u32> = Vec::with_capacity(self.info.channels as usize);
 
-    for _ in 0..self.info.channels {
-      match self.file.read_uint::<LittleEndian>(bytes_per_sample) {
+    for i in 0..self.info.channels {
+      match self.cursor.read_uint::<LittleEndian>(bytes_per_sample) {
         Ok(sample) => samples.push(sample as u32),
-        Err(_)     => { return None; }
+        Err(e)     => { panic!("{:?}", e); }
       }
     }
     match self.info.channels {
@@ -90,12 +115,25 @@ impl Iterator for WaveFile {
 
 impl WaveFile {
 
+  pub fn iter(self) -> WaveFileIntoIter {
+    self.into_iter()
+  }
+
   pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WavError> {
     let filename = path.into();
     let mut file = File::open(filename)?;
     let info = WaveFile::read_header_chunks(&mut file)?;
+    let data = WaveFile::read_data(&mut file, &info)?;
 
-    Ok(WaveFile { file: file, info: info, current_frame: 0 })
+    Ok(WaveFile { file: file, info: info, current_frame: 0, data: data })
+  }
+
+  fn read_data(file: &mut File, info: &WaveInfo) -> Result<Vec<u8>, WavError> {
+    let total_bytes = info.channels as usize * info.total_frames as usize * info.bits_per_sample as usize / 8;
+    let mut data = Vec::with_capacity(total_bytes);
+
+    let r = file.read_to_end(&mut data)?;
+    Ok(data)
   }
 
   fn read_header_chunks(file: &mut File) -> Result<WaveInfo, WavError> {
@@ -106,7 +144,7 @@ impl WaveFile {
 
     file.read_u32::<LittleEndian>()?;
 
-    let riff_type      = file.read_u32::<LittleEndian>()?;
+    let riff_type = file.read_u32::<LittleEndian>()?;
 
     if chunk_id != RIFF || riff_type != WAVE {
       return Err(WavError::ParseError("Not a Wavefile"));
@@ -182,12 +220,12 @@ fn test_parse_file_info() {
 
 #[test]
 fn test_read_frame_values() {
-  let mut file = match WaveFile::open("./fixtures/test.wav") {
+  let file = match WaveFile::open("./fixtures/test.wav") {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
   };
 
-  let frames = file.take(2).collect::<Vec<_>>();
+  let frames = file.iter().take(2).collect::<Vec<_>>();
   let expected = vec![
     Frame::Stereo(19581, 19581),
     Frame::Stereo(24337, 24337)
@@ -200,11 +238,27 @@ fn test_read_frame_values() {
 
 #[test]
 fn test_read_all_frames() {
-  let mut file = match WaveFile::open("./fixtures/test.wav") {
+  let file = match WaveFile::open("./fixtures/test.wav") {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
   };
 
-  let frames = file.collect::<Vec<_>>();
+  let frames = file.iter().collect::<Vec<_>>();
   assert_eq!(frames.len(), 501888);
+}
+
+#[bench]
+fn bench_read_frames(b: &mut test::Bencher) {
+  let mut file = match WaveFile::open("./fixtures/test.wav") {
+    Ok(f) => f,
+    Err(e) => panic!("Error: {:?}", e)
+  };
+  let mut iter = file.iter();
+
+  b.iter(|| test::black_box(iter.next()) );
+}
+
+#[bench]
+fn bench_empty(b: &mut test::Bencher) {
+  b.iter(|| test::black_box(1));
 }
