@@ -4,4 +4,5 @@ version = "0.1.0"
 authors = ["John Ledbetter <john@callrail.com>"]
 
 [dependencies]
-byteorder = "*"
+byteorder = "0.4"
+memmap = "0.2"

@@ -1,9 +1,9 @@
-#![feature(question_mark,test)]
+#![feature(question_mark)]
+extern crate memmap;
 extern crate byteorder;
-extern crate test;
 
-use std::fs::{File};
-use std::io::{self,Seek,SeekFrom,Cursor,Read};
+use std::io::{self,Seek,SeekFrom,Cursor};
+use memmap::{Mmap,Protection};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -13,41 +13,46 @@ const FMT_ : u32 = 0x20746d66;
 const DATA : u32 = 0x61746164;
 const LIST : u32 = 0x5453494c;
 
-pub const FORMAT_PCM          : u16 = 1;
-pub const FORMAT_IEE_FLOAT    : u16 = 3;
-pub const FORMAT_WAV_EXTENDED : u16 = 0xfffe;
+const FORMAT_PCM  : u16 = 1;
+const FORMAT_IEEE : u16 = 3;
+const FORMAT_EXT  : u16 = 0xfffe;
+
+#[derive(Debug,Copy,Clone,PartialEq)]
+pub enum Format {
+  PCM       = FORMAT_PCM  as isize,
+  IEEEFloat = FORMAT_IEEE as isize,
+  Extended  = FORMAT_EXT  as isize
+}
 
 #[derive(Debug)]
-pub enum WavError {
+pub enum WaveError {
   IoError(io::Error),
   Unsupported(&'static str),
   ParseError(&'static str)
 }
 
-#[derive(Debug)]
+#[derive(Debug,Copy,Clone)]
 pub struct WaveInfo {
-  audio_format:    u16,
-  channels:        u16,
-  samples_rate:    u32,
-  byte_rate:       u32,
-  block_align:     u16,
-  bits_per_sample: u16,
-  total_frames:    u32
+  pub audio_format:    Format,
+  pub channels:        u16,
+  pub samples_rate:    u32,
+  pub byte_rate:       u32,
+  pub block_align:     u16,
+  pub bits_per_sample: u16,
+  pub total_frames:    u32
 }
 
-#[derive(Debug)]
 pub struct WaveFile {
-  file:          File,
-  info:          WaveInfo,
-  current_frame: u32,
-  data:          Vec<u8>
+  mmap:        Mmap,
+  data_offset: usize,
+  pub info:    WaveInfo
 }
 
-#[derive(Debug)]
-pub struct WaveFileIntoIter {
-  info:            WaveInfo,
-  bytes_per_frame: usize,
-  cursor:          Cursor<Vec<u8>>
+pub struct WaveFileIterator<'a> {
+  file:             &'a WaveFile,
+  pos:              usize,
+  base:             usize,
+  bytes_per_sample: usize,
 }
 
 #[derive(Debug,PartialEq)]
@@ -57,101 +62,27 @@ pub enum Frame {
   Multi(Vec<u32>)
 }
 
-impl From<io::Error> for WavError {
+impl From<io::Error> for WaveError {
   fn from(e: io::Error) -> Self {
-    WavError::IoError(e)
+    WaveError::IoError(e)
   }
 }
 
-impl From<byteorder::Error> for WavError {
+impl From<byteorder::Error> for WaveError {
   fn from(e: byteorder::Error) -> Self {
     match e {
-      byteorder::Error::UnexpectedEOF => WavError::ParseError("Unexpected EOF"),
-      byteorder::Error::Io(e) => WavError::IoError(e)
-    }
-  }
-}
-
-impl IntoIterator for WaveFile {
-  type Item = Frame;
-  type IntoIter = WaveFileIntoIter;
-
-  fn into_iter(self) -> Self::IntoIter {
-    let bytes_per_frame = self.info.channels as usize * self.info.bits_per_sample as usize / 8;
-    let cursor = Cursor::new(self.data);
-    WaveFileIntoIter {
-      info:            self.info,
-      bytes_per_frame: bytes_per_frame,
-      cursor:          cursor
-    }
-  }
-}
-
-impl Iterator for WaveFileIntoIter {
-  type Item = Frame;
-
-  fn next(&mut self) -> Option<Frame> {
-    if self.cursor.position() as usize >= self.cursor.get_ref().len() {
-      return None;
-    }
-
-    let bytes_per_sample = self.bytes_per_frame / self.info.channels as usize;
-    let mut samples : Vec<u32> = Vec::with_capacity(self.info.channels as usize);
-
-    for i in 0..self.info.channels {
-      match self.cursor.read_uint::<LittleEndian>(bytes_per_sample) {
-        Ok(sample) => samples.push(sample as u32),
-        Err(e)     => { panic!("{:?}", e); }
-      }
-    }
-    match self.info.channels {
-      0 => unreachable!(),
-      1 => { Some(Frame::Mono(samples[0])) },
-      2 => { Some(Frame::Stereo(samples[0], samples[1])) },
-      _ => { Some(Frame::Multi(samples)) }
+      byteorder::Error::UnexpectedEOF => WaveError::ParseError("Unexpected EOF"),
+      byteorder::Error::Io(e) => WaveError::IoError(e)
     }
   }
 }
 
 impl WaveFile {
-
-  pub fn iter(self) -> WaveFileIntoIter {
-    self.into_iter()
-  }
-
-  pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WavError> {
+  pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WaveError> {
     let filename = path.into();
-    let mut file = File::open(filename)?;
-    let info = WaveFile::read_header_chunks(&mut file)?;
-    let data = WaveFile::read_data(&mut file, &info)?;
-
-    Ok(WaveFile { file: file, info: info, current_frame: 0, data: data })
-  }
-
-  fn read_data(file: &mut File, info: &WaveInfo) -> Result<Vec<u8>, WavError> {
-    let total_bytes = info.channels as usize * info.total_frames as usize * info.bits_per_sample as usize / 8;
-    let mut data = Vec::with_capacity(total_bytes);
-
-    let r = file.read_to_end(&mut data)?;
-    Ok(data)
-  }
-
-  fn read_header_chunks(file: &mut File) -> Result<WaveInfo, WavError> {
-    let mut have_fmt   = false;
-    let mut chunk_id   = file.read_u32::<LittleEndian>()?;
-    let mut chunk_size : u32;
-    let data_size : u32;
-
-    file.read_u32::<LittleEndian>()?;
-
-    let riff_type = file.read_u32::<LittleEndian>()?;
-
-    if chunk_id != RIFF || riff_type != WAVE {
-      return Err(WavError::ParseError("Not a Wavefile"));
-    }
-
-    let mut info = WaveInfo{
-      audio_format:    0,
+    let mmap = Mmap::open_path(filename, Protection::Read)?;
+    let info = WaveInfo {
+      audio_format:    Format::PCM,
       channels:        0,
       samples_rate:    0,
       byte_rate:       0,
@@ -159,67 +90,118 @@ impl WaveFile {
       bits_per_sample: 0,
       total_frames:    0
     };
+    let mut file = WaveFile { mmap: mmap, data_offset: 0, info: info };
+
+    file.read_header_chunks()?;
+
+    Ok(file)
+  }
+
+  pub fn iter(&self) -> WaveFileIterator {
+    let bytes_per_sample = self.info.bits_per_sample as usize / 8;
+    WaveFileIterator {
+      file:             &self,
+      pos:              0,
+      base:             self.data_offset,
+      bytes_per_sample: bytes_per_sample
+    }
+  }
+
+  fn read_header_chunks(&mut self) -> Result<(), WaveError> {
+    let mut cursor   = Cursor::new(unsafe { self.mmap.as_slice() } );
+    let mut have_fmt = false;
+    let mut chunk_id = cursor.read_u32::<LittleEndian>()?;
+
+    let mut chunk_size : u32;
+    let data_size : u32;
+
+    cursor.read_u32::<LittleEndian>()?;
+
+    let riff_type = cursor.read_u32::<LittleEndian>()?;
+
+    if chunk_id != RIFF || riff_type != WAVE {
+      return Err(WaveError::ParseError("Not a Wavefile"));
+    }
 
 
     loop {
-      chunk_id   = file.read_u32::<LittleEndian>()?;
-      chunk_size = file.read_u32::<LittleEndian>()?;
+      chunk_id   = cursor.read_u32::<LittleEndian>()?;
+      chunk_size = cursor.read_u32::<LittleEndian>()?;
 
       match chunk_id {
         FMT_ => {
           have_fmt = true;
-          info.audio_format    = file.read_u16::<LittleEndian>()?;
-          info.channels        = file.read_u16::<LittleEndian>()?;
-          info.samples_rate    = file.read_u32::<LittleEndian>()?;
-          info.byte_rate       = file.read_u32::<LittleEndian>()?;
-          info.block_align     = file.read_u16::<LittleEndian>()?;
-          info.bits_per_sample = file.read_u16::<LittleEndian>()?;
+          self.info.audio_format = match cursor.read_u16::<LittleEndian>()? {
+            FORMAT_PCM => Format::PCM,
+            _          => {
+              return Err(WaveError::ParseError("Unexpected or unimplemented format"))
+            }
+          };
+          self.info.channels        = cursor.read_u16::<LittleEndian>()?;
+          self.info.samples_rate    = cursor.read_u32::<LittleEndian>()?;
+          self.info.byte_rate       = cursor.read_u32::<LittleEndian>()?;
+          self.info.block_align     = cursor.read_u16::<LittleEndian>()?;
+          self.info.bits_per_sample = cursor.read_u16::<LittleEndian>()?;
         },
         DATA => {
           data_size = chunk_size;
           break;
         },
-        LIST => { file.seek(SeekFrom::Current(chunk_size as i64))?; },
-        _    => { return Err(WavError::ParseError("Unexpected Chunk ID")); }
+        LIST => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
+        _    => { return Err(WaveError::ParseError("Unexpected Chunk ID")); }
       }
     }
 
     if !have_fmt {
-      return Err(WavError::ParseError("Format Chunk not found"));
+      return Err(WaveError::ParseError("Format Chunk not found"));
     }
 
-    if info.audio_format != FORMAT_PCM {
-      return Err(WavError::Unsupported("Non-PCM Format"));
+    if self.info.channels == 0 || self.info.bits_per_sample < 8 {
+      return Err(WaveError::ParseError("Invalid channel or bits per sample value found"));
     }
 
-    if info.channels == 0 || info.bits_per_sample < 8 {
-      return Err(WavError::ParseError("Invalid channel or bits per sample value found"));
-    }
+    self.info.total_frames = data_size / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
 
-    info.total_frames = data_size / (info.channels as u32 * info.bits_per_sample as u32 / 8 );
-
-    Ok(info)
+    self.data_offset = cursor.position() as usize;
+    Ok(())
   }
 }
 
-#[test]
-fn test_parse_file_info() {
-  let file = match WaveFile::open("./fixtures/test.wav") {
-    Ok(f) => f,
-    Err(e) => panic!("Error: {:?}", e)
-  };
+impl<'a> Iterator for WaveFileIterator<'a> {
+  type Item = Frame;
 
-  assert_eq!(file.info.audio_format,    FORMAT_PCM);
-  assert_eq!(file.info.channels,        2);
-  assert_eq!(file.info.samples_rate,    48000);
-  assert_eq!(file.info.byte_rate,       288000);
-  assert_eq!(file.info.block_align,     6);
-  assert_eq!(file.info.bits_per_sample, 24);
-  assert_eq!(file.info.total_frames,    501888);
+  fn next(&mut self) -> Option<Self::Item> {
+    let mut cursor = Cursor::new(unsafe { self.file.mmap.as_slice() });
+    let info = self.file.info;
+
+    if let Err(_) = cursor.seek(SeekFrom::Start((self.base + self.pos) as u64)) {
+      return None;
+    };
+
+    let mut samples : Vec<u32> = Vec::with_capacity(info.channels as usize);
+
+    for _ in 0..info.channels {
+      match cursor.read_uint::<LittleEndian>(self.bytes_per_sample) {
+        Ok(sample) => samples.push(sample as u32),
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    self.pos = cursor.position() as usize - self.base;
+
+    match info.channels {
+      0 => unreachable!(),
+      1 => Some(Frame::Mono(samples[0])),
+      2 => Some(Frame::Stereo(samples[0], samples[1])),
+      _ => Some(Frame::Multi(samples))
+    }
+  }
+
 }
 
 #[test]
-fn test_read_frame_values() {
+fn test_iter() {
+
   let file = match WaveFile::open("./fixtures/test.wav") {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
@@ -234,31 +216,5 @@ fn test_read_frame_values() {
   for i in 0..expected.len() {
     assert_eq!(frames[i], expected[i]);
   }
-}
 
-#[test]
-fn test_read_all_frames() {
-  let file = match WaveFile::open("./fixtures/test.wav") {
-    Ok(f) => f,
-    Err(e) => panic!("Error: {:?}", e)
-  };
-
-  let frames = file.iter().collect::<Vec<_>>();
-  assert_eq!(frames.len(), 501888);
-}
-
-#[bench]
-fn bench_read_frames(b: &mut test::Bencher) {
-  let mut file = match WaveFile::open("./fixtures/test.wav") {
-    Ok(f) => f,
-    Err(e) => panic!("Error: {:?}", e)
-  };
-  let mut iter = file.iter();
-
-  b.iter(|| test::black_box(iter.next()) );
-}
-
-#[bench]
-fn bench_empty(b: &mut test::Bencher) {
-  b.iter(|| test::black_box(1));
 }
