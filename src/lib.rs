@@ -3,6 +3,8 @@ extern crate memmap;
 extern crate byteorder;
 
 use std::io::{self,Seek,SeekFrom,Cursor};
+use std::fmt::{self,Display};
+use std::error::{self};
 use memmap::{Mmap,Protection};
 
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -45,6 +47,7 @@ pub struct WaveInfo {
 pub struct WaveFile {
   mmap:        Mmap,
   data_offset: usize,
+  data_size:   usize,
   pub info:    WaveInfo
 }
 
@@ -52,14 +55,15 @@ pub struct WaveFileIterator<'a> {
   file:             &'a WaveFile,
   pos:              usize,
   base:             usize,
+  end:              usize,
   bytes_per_sample: usize,
 }
 
 #[derive(Debug,PartialEq)]
 pub enum Frame {
-  Mono(u32),
-  Stereo(u32, u32),
-  Multi(Vec<u32>)
+  Mono(i32),
+  Stereo(i32, i32),
+  Multi(Vec<i32>)
 }
 
 impl From<io::Error> for WaveError {
@@ -90,7 +94,7 @@ impl WaveFile {
       bits_per_sample: 0,
       total_frames:    0
     };
-    let mut file = WaveFile { mmap: mmap, data_offset: 0, info: info };
+    let mut file = WaveFile { mmap: mmap, data_offset: 0, data_size: 0, info: info };
 
     file.read_header_chunks()?;
 
@@ -103,6 +107,7 @@ impl WaveFile {
       file:             &self,
       pos:              0,
       base:             self.data_offset,
+      end:              self.data_offset + self.data_size,
       bytes_per_sample: bytes_per_sample
     }
   }
@@ -113,7 +118,6 @@ impl WaveFile {
     let mut chunk_id = cursor.read_u32::<LittleEndian>()?;
 
     let mut chunk_size : u32;
-    let data_size : u32;
 
     cursor.read_u32::<LittleEndian>()?;
 
@@ -144,7 +148,7 @@ impl WaveFile {
           self.info.bits_per_sample = cursor.read_u16::<LittleEndian>()?;
         },
         DATA => {
-          data_size = chunk_size;
+          self.data_size = chunk_size as usize;
           break;
         },
         LIST => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
@@ -160,7 +164,7 @@ impl WaveFile {
       return Err(WaveError::ParseError("Invalid channel or bits per sample value found"));
     }
 
-    self.info.total_frames = data_size / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
+    self.info.total_frames = self.data_size as u32 / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
 
     self.data_offset = cursor.position() as usize;
     Ok(())
@@ -178,11 +182,15 @@ impl<'a> Iterator for WaveFileIterator<'a> {
       return None;
     };
 
-    let mut samples : Vec<u32> = Vec::with_capacity(info.channels as usize);
+    if cursor.position() as usize == self.end {
+      return None;
+    }
+
+    let mut samples : Vec<i32> = Vec::with_capacity(info.channels as usize);
 
     for _ in 0..info.channels {
-      match cursor.read_uint::<LittleEndian>(self.bytes_per_sample) {
-        Ok(sample) => samples.push(sample as u32),
+      match cursor.read_int::<LittleEndian>(self.bytes_per_sample) {
+        Ok(sample) => samples.push(sample as i32),
         Err(e)     => { panic!("{:?}", e); }
       }
     }
@@ -196,7 +204,33 @@ impl<'a> Iterator for WaveFileIterator<'a> {
       _ => Some(Frame::Multi(samples))
     }
   }
+}
 
+impl error::Error for WaveError {
+  fn description(&self) -> &str {
+    match self {
+      &WaveError::ParseError(s) => &s,
+      &WaveError::Unsupported(s) => &s,
+      &WaveError::IoError(ref e) => e.description()
+    }
+  }
+
+  fn cause(&self) -> Option<&error::Error> {
+    match self {
+      &WaveError::IoError(ref e) => Some(e),
+      _ => None
+    }
+  }
+}
+
+impl Display for WaveError {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      &WaveError::IoError(ref e) => write!(f, "IO Error: {}", e),
+      &WaveError::ParseError(s)  => write!(f, "Parse Error: {}", s),
+      &WaveError::Unsupported(s) => write!(f, "Unsupported Format Error: {}", s)
+    }
+  }
 }
 
 #[test]
