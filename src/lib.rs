@@ -14,6 +14,7 @@ const WAVE : u32 = 0x45564157;
 const FMT_ : u32 = 0x20746d66;
 const DATA : u32 = 0x61746164;
 const LIST : u32 = 0x5453494c;
+const FACT : u32 = 0x74636166;
 
 const FORMAT_PCM  : u16 = 1;
 const FORMAT_IEEE : u16 = 3;
@@ -29,19 +30,22 @@ pub enum Format {
 #[derive(Debug)]
 pub enum WaveError {
   IoError(io::Error),
-  Unsupported(&'static str),
-  ParseError(&'static str)
+  Unsupported(String),
+  ParseError(String)
 }
 
 #[derive(Debug,Copy,Clone)]
 pub struct WaveInfo {
   pub audio_format:    Format,
   pub channels:        u16,
-  pub samples_rate:    u32,
+  pub sample_rate:     u32,
   pub byte_rate:       u32,
   pub block_align:     u16,
   pub bits_per_sample: u16,
-  pub total_frames:    u32
+  pub total_frames:    u32,
+  pub valid_bps:       Option<u16>,
+  pub channel_mask:    Option<u32>,
+  pub subformat:       Option<Format>
 }
 
 pub struct WaveFile {
@@ -75,7 +79,7 @@ impl From<io::Error> for WaveError {
 impl From<byteorder::Error> for WaveError {
   fn from(e: byteorder::Error) -> Self {
     match e {
-      byteorder::Error::UnexpectedEOF => WaveError::ParseError("Unexpected EOF"),
+      byteorder::Error::UnexpectedEOF => WaveError::ParseError("Unexpected EOF".into()),
       byteorder::Error::Io(e) => WaveError::IoError(e)
     }
   }
@@ -88,11 +92,14 @@ impl WaveFile {
     let info = WaveInfo {
       audio_format:    Format::PCM,
       channels:        0,
-      samples_rate:    0,
+      sample_rate:     0,
       byte_rate:       0,
       block_align:     0,
       bits_per_sample: 0,
-      total_frames:    0
+      total_frames:    0,
+      valid_bps:       None,
+      channel_mask:    None,
+      subformat:       None
     };
     let mut file = WaveFile { mmap: mmap, data_offset: 0, data_size: 0, info: info };
 
@@ -124,7 +131,7 @@ impl WaveFile {
     let riff_type = cursor.read_u32::<LittleEndian>()?;
 
     if chunk_id != RIFF || riff_type != WAVE {
-      return Err(WaveError::ParseError("Not a Wavefile"));
+      return Err(WaveError::ParseError("Not a Wavefile".into()));
     }
 
 
@@ -136,32 +143,73 @@ impl WaveFile {
         FMT_ => {
           have_fmt = true;
           self.info.audio_format = match cursor.read_u16::<LittleEndian>()? {
-            FORMAT_PCM => Format::PCM,
-            _          => {
-              return Err(WaveError::ParseError("Unexpected or unimplemented format"))
+            FORMAT_PCM  => Format::PCM,
+            FORMAT_IEEE => Format::IEEEFloat,
+            FORMAT_EXT  => Format::Extended,
+            other       => {
+              let msg = format!("Unexpected format {0:x}", other);
+              return Err(WaveError::ParseError(msg));
             }
           };
           self.info.channels        = cursor.read_u16::<LittleEndian>()?;
-          self.info.samples_rate    = cursor.read_u32::<LittleEndian>()?;
+          self.info.sample_rate     = cursor.read_u32::<LittleEndian>()?;
           self.info.byte_rate       = cursor.read_u32::<LittleEndian>()?;
           self.info.block_align     = cursor.read_u16::<LittleEndian>()?;
           self.info.bits_per_sample = cursor.read_u16::<LittleEndian>()?;
+
+          if self.info.audio_format == Format::Extended {
+            match cursor.read_u16::<LittleEndian>()? {
+              0 => { },
+              22 => {
+                self.info.valid_bps    = Some(cursor.read_u16::<LittleEndian>()?);
+                self.info.channel_mask = Some(cursor.read_u32::<LittleEndian>()?);
+                self.info.subformat    = match cursor.read_u16::<LittleEndian>()? {
+                  FORMAT_PCM  => Some(Format::PCM),
+                  FORMAT_IEEE => Some(Format::IEEEFloat),
+                  other       => {
+                    let msg = format!("Unexpected subformat {0:x}", other);
+                    return Err(WaveError::ParseError(msg));
+                  }
+                };
+                cursor.seek(SeekFrom::Current(14))?;
+              },
+              x => {
+                let msg = format!("Unexpected extension size: {}", x);
+                return Err(WaveError::ParseError(msg));
+              }
+            }
+
+          }
         },
-        DATA => {
+        DATA  => {
           self.data_size = chunk_size as usize;
           break;
         },
-        LIST => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
-        _    => { return Err(WaveError::ParseError("Unexpected Chunk ID")); }
+        LIST  => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
+        FACT  => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
+        other => {
+          let msg = format!("Unexpected Chunk ID {0:x}", other);
+          return Err(WaveError::ParseError(msg));
+        }
       }
     }
 
     if !have_fmt {
-      return Err(WaveError::ParseError("Format Chunk not found"));
+      return Err(WaveError::ParseError("Format Chunk not found".into()));
+    }
+
+    if self.info.audio_format == Format::IEEEFloat {
+      return Err(WaveError::Unsupported("IEEE Float format not implemented".into()));
+    }
+    if self.info.audio_format == Format::Extended && self.info.subformat != Some(Format::PCM) {
+      return Err(WaveError::Unsupported("Only PCM data is supported for Ext Wave".into()));
     }
 
     if self.info.channels == 0 || self.info.bits_per_sample < 8 {
-      return Err(WaveError::ParseError("Invalid channel or bits per sample value found"));
+      let msg = format!("Invalid channel count {} or bits per sample {} value",
+                        self.info.channels, self.info.bits_per_sample);
+
+      return Err(WaveError::ParseError(msg));
     }
 
     self.info.total_frames = self.data_size as u32 / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
@@ -209,9 +257,9 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 impl error::Error for WaveError {
   fn description(&self) -> &str {
     match self {
-      &WaveError::ParseError(s) => &s,
-      &WaveError::Unsupported(s) => &s,
-      &WaveError::IoError(ref e) => e.description()
+      &WaveError::ParseError(ref s)  => &s,
+      &WaveError::Unsupported(ref s) => &s,
+      &WaveError::IoError(ref e)     => e.description()
     }
   }
 
@@ -226,17 +274,45 @@ impl error::Error for WaveError {
 impl Display for WaveError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      &WaveError::IoError(ref e) => write!(f, "IO Error: {}", e),
-      &WaveError::ParseError(s)  => write!(f, "Parse Error: {}", s),
-      &WaveError::Unsupported(s) => write!(f, "Unsupported Format Error: {}", s)
+      &WaveError::IoError(ref e)     => write!(f, "IO Error: {}", e),
+      &WaveError::ParseError(ref s)  => write!(f, "Parse Error: {}", s),
+      &WaveError::Unsupported(ref s) => write!(f, "Unsupported Format Error: {}", s)
     }
   }
 }
 
 #[test]
-fn test_iter() {
+fn test_info() {
+  let file = match WaveFile::open("./fixtures/test-s24le.wav") {
+    Ok(f) => f,
+    Err(e) => panic!("Error: {:?}", e)
+  };
 
-  let file = match WaveFile::open("./fixtures/test.wav") {
+  assert_eq!(file.info.audio_format,    Format::PCM);
+  assert_eq!(file.info.channels,        2);
+  assert_eq!(file.info.sample_rate,     48000);
+  assert_eq!(file.info.byte_rate,       288000);
+  assert_eq!(file.info.block_align,     6);
+  assert_eq!(file.info.bits_per_sample, 24);
+  assert_eq!(file.info.total_frames,    501888);
+
+  let file = match WaveFile::open("./fixtures/test-u8.wav") {
+    Ok(f) => f,
+    Err(e) => panic!("Error: {:?}", e)
+  };
+
+  assert_eq!(file.info.audio_format, Format::PCM);
+  assert_eq!(file.info.channels,        2);
+  assert_eq!(file.info.sample_rate,     48000);
+  assert_eq!(file.info.byte_rate,       96000);
+  assert_eq!(file.info.bits_per_sample, 8);
+  assert_eq!(file.info.block_align,     2);
+  assert_eq!(file.info.total_frames,    501888);
+}
+
+#[test]
+fn test_iter() {
+  let file = match WaveFile::open("./fixtures/test-s24le.wav") {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
   };
@@ -251,4 +327,17 @@ fn test_iter() {
     assert_eq!(frames[i], expected[i]);
   }
 
+}
+
+
+#[test]
+fn test_formats() {
+  if let Err(e) = WaveFile::open("./fixtures/test-f32le.wav") {
+    match e {
+      WaveError::Unsupported(_) => true,
+      _ => panic!("Unexpected error (expected Unsupported)")
+    };
+  } else {
+    panic!("Unsupported format returned OK?");
+  }
 }
