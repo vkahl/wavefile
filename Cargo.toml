@@ -1,8 +1,13 @@
 [package]
-name = "wavefile"
-version = "0.1.0"
-authors = ["John Ledbetter <john@callrail.com>"]
+name        = "wavefile"
+version     = "0.1.0"
+authors     = ["John Ledbetter <john@throttle.io>"]
+description = "Simple wavefile parser."
+keywords    = ["wav", "wavefile", "wavfile"]
+license     = "MIT"
+repository  = "https://github.com/ledbettj/wavefile.git"
+homepage    = "https://github.com/ledbettj/wavefile.git"
 
 [dependencies]
 byteorder = "0.4"
-memmap = "0.2"
+memmap    = "0.2"
