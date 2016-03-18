@@ -35,15 +35,25 @@ pub enum WaveError {
 
 #[derive(Debug,Copy,Clone)]
 pub struct WaveInfo {
+  /// Which encoding format this file uses.
+  /// If the format is `Format::Extended`, then the actual audio format is
+  /// instead determined by the `subformat` field.
   pub audio_format:    Format,
+  /// Number of distinct audio channels.
   pub channels:        u16,
+  /// Number of audio samples per second.
   pub sample_rate:     u32,
   pub byte_rate:       u32,
   pub block_align:     u16,
+  /// Number of bits used to represent each sample.
   pub bits_per_sample: u16,
+  /// Number of frames present in the file.  Each frame contains one sample per
+  /// channel.
   pub total_frames:    u32,
   pub valid_bps:       Option<u16>,
   pub channel_mask:    Option<u32>,
+  /// For `Format::Extended` files, this field contains the actual audo encoding
+  /// of the file, either `Format::PCM` or `Format::IEEEFloat`.
   pub subformat:       Option<Format>
 }
 
@@ -64,8 +74,11 @@ pub struct WaveFileIterator<'a> {
 
 #[derive(Debug,PartialEq)]
 pub enum Frame {
+  /// Represents a frame from a single-channel file.
   Mono(i32),
+  /// Represents a frame from a stereo (2 channel) file.
   Stereo(i32, i32),
+  /// Represents a frame from a file with more than two channels.
   Multi(Vec<i32>)
 }
 
@@ -85,6 +98,18 @@ impl From<byteorder::Error> for WaveError {
 }
 
 impl WaveFile {
+  /// Constructs a new `WaveFile`.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use wavefile::{WaveFile,WaveError};
+  ///
+  /// match WaveFile::open("./example.wav") {
+  ///   Ok(f)  => f,
+  ///   Err(e) => panic!("Couldn't open example file: {}", e)
+  /// };
+  /// ```
   pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WaveError> {
     let filename = path.into();
     let mmap = try!(Mmap::open_path(filename, Protection::Read));
@@ -107,6 +132,20 @@ impl WaveFile {
     Ok(file)
   }
 
+  /// Returns an iterator which yields each individual `Frame` successively
+  /// until it reaches the end of the file.
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use wavefile::WaveFile;
+  ///
+  /// let wav = WaveFile::open("./example.wav").unwrap();
+  ///
+  /// for frame in wav.iter() {
+  ///   println!("{:?}", frame);
+  /// }
+  /// ```
   pub fn iter(&self) -> WaveFileIterator {
     let bytes_per_sample = self.info.bits_per_sample as usize / 8;
     WaveFileIterator {
