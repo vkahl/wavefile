@@ -1,9 +1,11 @@
 extern crate memmap;
 extern crate byteorder;
 
-use std::io::{self,Seek,SeekFrom,Cursor};
-use std::fmt::{self,Display};
-use std::error::{self};
+pub mod error;
+
+pub use self::error::WaveError;
+
+use std::io::{Seek,SeekFrom,Cursor};
 use memmap::{Mmap,Protection};
 
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -24,13 +26,6 @@ pub enum Format {
   PCM       = FORMAT_PCM  as isize,
   IEEEFloat = FORMAT_IEEE as isize,
   Extended  = FORMAT_EXT  as isize
-}
-
-#[derive(Debug)]
-pub enum WaveError {
-  IoError(io::Error),
-  Unsupported(String),
-  ParseError(String)
 }
 
 #[derive(Debug,Copy,Clone)]
@@ -80,21 +75,6 @@ pub enum Frame {
   Stereo(i32, i32),
   /// Represents a frame from a file with more than two channels.
   Multi(Vec<i32>)
-}
-
-impl From<io::Error> for WaveError {
-  fn from(e: io::Error) -> Self {
-    WaveError::IoError(e)
-  }
-}
-
-impl From<byteorder::Error> for WaveError {
-  fn from(e: byteorder::Error) -> Self {
-    match e {
-      byteorder::Error::UnexpectedEOF => WaveError::ParseError("Unexpected EOF".into()),
-      byteorder::Error::Io(e) => WaveError::IoError(e)
-    }
-  }
 }
 
 impl WaveFile {
@@ -288,33 +268,6 @@ impl<'a> Iterator for WaveFileIterator<'a> {
       1 => Some(Frame::Mono(samples[0])),
       2 => Some(Frame::Stereo(samples[0], samples[1])),
       _ => Some(Frame::Multi(samples))
-    }
-  }
-}
-
-impl error::Error for WaveError {
-  fn description(&self) -> &str {
-    match self {
-      &WaveError::ParseError(ref s)  => &s,
-      &WaveError::Unsupported(ref s) => &s,
-      &WaveError::IoError(ref e)     => e.description()
-    }
-  }
-
-  fn cause(&self) -> Option<&error::Error> {
-    match self {
-      &WaveError::IoError(ref e) => Some(e),
-      _ => None
-    }
-  }
-}
-
-impl Display for WaveError {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match self {
-      &WaveError::IoError(ref e)     => write!(f, "IO Error: {}", e),
-      &WaveError::ParseError(ref s)  => write!(f, "Parse Error: {}", s),
-      &WaveError::Unsupported(ref s) => write!(f, "Unsupported Format Error: {}", s)
     }
   }
 }
