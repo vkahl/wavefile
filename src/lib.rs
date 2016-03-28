@@ -1,6 +1,9 @@
-extern crate memmap;
 extern crate byteorder;
+extern crate memmap;
+#[macro_use]
+extern crate nom;
 
+mod parser;
 pub mod error;
 
 pub use self::error::WaveError;

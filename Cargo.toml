@@ -12,3 +12,4 @@ exclude     = [ "fixtures/*" ]
 [dependencies]
 byteorder = "0.4"
 memmap    = "0.2"
+nom       = "~1.2.2"
