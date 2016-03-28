@@ -340,6 +340,10 @@ fn test_iter() {
     assert_eq!(frames[i], expected[i]);
   }
 
+  let frame = file.iter().last().unwrap();
+  let expected = Frame::Stereo(244, 244);
+
+  assert_eq!(frame, expected)
 }
 
 
