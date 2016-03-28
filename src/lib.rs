@@ -28,6 +28,9 @@ pub enum Format {
   Extended  = FORMAT_EXT  as isize
 }
 
+/// Contains information included in the wavefile's header section,
+/// describing the format, sample size, and number of audio channels
+/// present.
 #[derive(Debug,Copy,Clone)]
 pub struct WaveInfo {
   /// Which encoding format this file uses.
@@ -59,6 +62,8 @@ pub struct WaveFile {
   info:        WaveInfo
 }
 
+/// An iterator which yields successive `Frames` of audio from the associated
+/// wavefile.
 pub struct WaveFileIterator<'a> {
   file:             &'a WaveFile,
   pos:              usize,
@@ -67,6 +72,9 @@ pub struct WaveFileIterator<'a> {
   bytes_per_sample: usize,
 }
 
+/// Represents a single frame of audio, containing one sample per audio channel.
+/// For example, a mono audio file will contain only one sample; a stereo file
+/// will contain two.
 pub type Frame = Vec<i32>;
 
 impl WaveFile {
@@ -104,14 +112,18 @@ impl WaveFile {
     Ok(file)
   }
 
+  /// The number of audio channels in the file.
   pub fn channels(&self) -> usize {
     self.info.channels as usize
   }
 
+  /// The number of samples present for one second of audio.
   pub fn sample_rate(&self) -> usize {
     self.info.sample_rate as usize
   }
 
+  /// The total number of frames present in the file.
+  /// Each frame will contain `channels()` number of samples.
   pub fn len(&self) -> usize {
     self.info.total_frames as usize
   }
@@ -120,6 +132,8 @@ impl WaveFile {
     self.info.bits_per_sample as usize
   }
 
+  /// Returns a copy of the `WaveInfo` for this file,
+  /// parsed from the file header.
   pub fn info(&self) -> WaveInfo {
     self.info
   }
