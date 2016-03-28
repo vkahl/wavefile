@@ -132,6 +132,14 @@ impl WaveFile {
     self.info.bits_per_sample as usize
   }
 
+  pub fn data_format(&self) -> Format {
+    if self.info.audio_format == Format::Extended {
+      self.info.subformat.unwrap()
+    } else {
+      self.info.audio_format
+    }
+  }
+
   /// Returns a copy of the `WaveInfo` for this file,
   /// parsed from the file header.
   pub fn info(&self) -> WaveInfo {
@@ -242,13 +250,6 @@ impl WaveFile {
       return Err(WaveError::ParseError("Format Chunk not found".into()));
     }
 
-    if self.info.audio_format == Format::IEEEFloat {
-      return Err(WaveError::Unsupported("IEEE Float format not implemented".into()));
-    }
-    if self.info.audio_format == Format::Extended && self.info.subformat != Some(Format::PCM) {
-      return Err(WaveError::Unsupported("Only PCM data is supported for Ext Wave".into()));
-    }
-
     if self.info.channels == 0 || self.info.bits_per_sample < 8 {
       let msg = format!("Invalid channel count {} or bits per sample {} value",
                         self.info.channels, self.info.bits_per_sample);
@@ -268,7 +269,6 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 
   fn next(&mut self) -> Option<Self::Item> {
     let mut cursor = Cursor::new(unsafe { self.file.mmap.as_slice() });
-    let info = self.file.info;
 
     if let Err(_) = cursor.seek(SeekFrom::Start((self.base + self.pos) as u64)) {
       return None;
@@ -278,20 +278,57 @@ impl<'a> Iterator for WaveFileIterator<'a> {
       return None;
     }
 
-    let mut samples : Vec<i32> = Vec::with_capacity(info.channels as usize);
+    let (frame, new_pos) = match self.file.data_format() {
+      Format::PCM => WaveFileIterator::next_pcm(&mut cursor,
+                                                self.file.channels(),
+                                                self.bytes_per_sample),
+      Format::IEEEFloat => WaveFileIterator::next_float(&mut cursor,
+                                                        self.file.channels(),
+                                                        self.bytes_per_sample),
+      _ => unreachable!()
+    };
 
-    for _ in 0..info.channels {
-      match cursor.read_int::<LittleEndian>(self.bytes_per_sample) {
+    self.pos = new_pos - self.base;
+
+
+    Some(frame)
+  }
+}
+
+impl<'a> WaveFileIterator<'a> {
+  fn next_pcm(cursor: &mut Cursor<&[u8]>, channels: usize, bps: usize) -> (Frame, usize) {
+    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+
+    for _ in 0..channels {
+      match cursor.read_int::<LittleEndian>(bps) {
         Ok(sample) => samples.push(sample as i32),
         Err(e)     => { panic!("{:?}", e); }
       }
     }
 
-    self.pos = cursor.position() as usize - self.base;
-
-
-    Some(samples)
+    (samples, cursor.position() as usize)
   }
+
+  fn next_float(cursor: &mut Cursor<&[u8]>, channels: usize, bps: usize) -> (Frame, usize) {
+    if bps != 4 {
+      panic!("Can't handle the specified bytes per sample");
+    }
+
+    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+
+    for _ in 0..channels {
+      match cursor.read_f32::<LittleEndian>() {
+        Ok(sample) => {
+          let scaled = (sample * 2147483647.0) as i32;
+          samples.push(scaled);
+        },
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    (samples, cursor.position() as usize)
+  }
+
 }
 
 #[test]
@@ -350,13 +387,23 @@ fn test_iter() {
 
 
 #[test]
-fn test_formats() {
-  if let Err(e) = WaveFile::open("./fixtures/test-f32le.wav") {
-    match e {
-      WaveError::Unsupported(_) => true,
-      _ => panic!("Unexpected error (expected Unsupported)")
-    };
-  } else {
-    panic!("Unsupported format returned OK?");
+fn test_float_extended() {
+  let file = WaveFile::open("./fixtures/test-f32le.wav").unwrap();
+  let info = file.info();
+
+  assert_eq!(info.audio_format,  Format::Extended);
+  assert_eq!(file.data_format(), Format::IEEEFloat);
+  assert_eq!(file.len(),         501888);
+
+  let frames = file.iter().take(2).collect::<Vec<_>>();
+  // these are the same values as the 24-bit samples,
+  // however we've scaled to 32-bit.
+  let expected = vec![
+    [5012736, 5012736],
+    [6230272, 6230272]
+  ];
+
+  for i in 0..expected.len() {
+    assert_eq!(frames[i], expected[i]);
   }
 }
