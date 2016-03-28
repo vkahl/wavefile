@@ -67,15 +67,7 @@ pub struct WaveFileIterator<'a> {
   bytes_per_sample: usize,
 }
 
-#[derive(Debug,PartialEq)]
-pub enum Frame {
-  /// Represents a frame from a single-channel file.
-  Mono(i32),
-  /// Represents a frame from a stereo (2 channel) file.
-  Stereo(i32, i32),
-  /// Represents a frame from a file with more than two channels.
-  Multi(Vec<i32>)
-}
+pub type Frame = Vec<i32>;
 
 impl WaveFile {
   /// Constructs a new `WaveFile`.
@@ -283,12 +275,8 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 
     self.pos = cursor.position() as usize - self.base;
 
-    match info.channels {
-      0 => unreachable!(),
-      1 => Some(Frame::Mono(samples[0])),
-      2 => Some(Frame::Stereo(samples[0], samples[1])),
-      _ => Some(Frame::Multi(samples))
-    }
+
+    Some(samples)
   }
 }
 
@@ -332,8 +320,8 @@ fn test_iter() {
 
   let frames = file.iter().take(2).collect::<Vec<_>>();
   let expected = vec![
-    Frame::Stereo(19581, 19581),
-    Frame::Stereo(24337, 24337)
+    [19581, 19581],
+    [24337, 24337]
   ];
 
   for i in 0..expected.len() {
@@ -341,7 +329,7 @@ fn test_iter() {
   }
 
   let frame = file.iter().last().unwrap();
-  let expected = Frame::Stereo(244, 244);
+  let expected = [244, 244];
 
   assert_eq!(frame, expected)
 }
