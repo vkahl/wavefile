@@ -56,7 +56,7 @@ pub struct WaveFile {
   mmap:        Mmap,
   data_offset: usize,
   data_size:   usize,
-  pub info:    WaveInfo
+  info:        WaveInfo
 }
 
 pub struct WaveFileIterator<'a> {
@@ -110,6 +110,26 @@ impl WaveFile {
     try!(file.read_header_chunks());
 
     Ok(file)
+  }
+
+  pub fn channels(&self) -> usize {
+    self.info.channels as usize
+  }
+
+  pub fn sample_rate(&self) -> usize {
+    self.info.sample_rate as usize
+  }
+
+  pub fn len(&self) -> usize {
+    self.info.total_frames as usize
+  }
+
+  pub fn bits_per_sample(&self) -> usize {
+    self.info.bits_per_sample as usize
+  }
+
+  pub fn info(&self) -> WaveInfo {
+    self.info
   }
 
   /// Returns an iterator which yields each individual `Frame` successively
@@ -278,27 +298,29 @@ fn test_info() {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
   };
+  let info = file.info();
 
-  assert_eq!(file.info.audio_format,    Format::PCM);
-  assert_eq!(file.info.channels,        2);
-  assert_eq!(file.info.sample_rate,     48000);
-  assert_eq!(file.info.byte_rate,       288000);
-  assert_eq!(file.info.block_align,     6);
-  assert_eq!(file.info.bits_per_sample, 24);
-  assert_eq!(file.info.total_frames,    501888);
+  assert_eq!(info.audio_format,    Format::PCM);
+  assert_eq!(info.channels,        2);
+  assert_eq!(info.sample_rate,     48000);
+  assert_eq!(info.byte_rate,       288000);
+  assert_eq!(info.block_align,     6);
+  assert_eq!(info.bits_per_sample, 24);
+  assert_eq!(info.total_frames,    501888);
 
   let file = match WaveFile::open("./fixtures/test-u8.wav") {
     Ok(f) => f,
     Err(e) => panic!("Error: {:?}", e)
   };
+  let info = file.info();
 
-  assert_eq!(file.info.audio_format, Format::PCM);
-  assert_eq!(file.info.channels,        2);
-  assert_eq!(file.info.sample_rate,     48000);
-  assert_eq!(file.info.byte_rate,       96000);
-  assert_eq!(file.info.bits_per_sample, 8);
-  assert_eq!(file.info.block_align,     2);
-  assert_eq!(file.info.total_frames,    501888);
+  assert_eq!(info.audio_format,    Format::PCM);
+  assert_eq!(info.channels,        2);
+  assert_eq!(info.sample_rate,     48000);
+  assert_eq!(info.byte_rate,       96000);
+  assert_eq!(info.bits_per_sample, 8);
+  assert_eq!(info.block_align,     2);
+  assert_eq!(info.total_frames,    501888);
 }
 
 #[test]
