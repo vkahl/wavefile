@@ -85,7 +85,7 @@ impl WaveFile {
   /// ```
   /// use wavefile::{WaveFile,WaveError};
   ///
-  /// match WaveFile::open("./example.wav") {
+  /// match WaveFile::open("./fixtures/test-s24le.wav") {
   ///   Ok(f)  => f,
   ///   Err(e) => panic!("Couldn't open example file: {}", e)
   /// };
@@ -117,10 +117,10 @@ impl WaveFile {
   ///
   /// # Example
   ///
-  /// ```
+  /// ```no_run
   /// use wavefile::WaveFile;
   ///
-  /// let wav = WaveFile::open("./example.wav").unwrap();
+  /// let wav = WaveFile::open("./fixtures/test-s24le.wav").unwrap();
   ///
   /// for frame in wav.iter() {
   ///   println!("{:?}", frame);
