@@ -309,10 +309,14 @@ impl<'a> WaveFileIterator<'a> {
   }
 
   fn next_float(cursor: &mut Cursor<&[u8]>, channels: usize, bps: usize) -> (Frame, usize) {
-    if bps != 4 {
-      panic!("Can't handle the specified bytes per sample");
+    match bps {
+      4 => WaveFileIterator::next_float32(cursor, channels),
+      8 => WaveFileIterator::next_float64(cursor, channels),
+      _ => panic!("Can't handle the specified float bytes per sample")
     }
+  }
 
+  fn next_float32(cursor: &mut Cursor<&[u8]>, channels: usize) -> (Frame, usize) {
     let mut samples : Vec<i32> = Vec::with_capacity(channels);
 
     for _ in 0..channels {
@@ -328,6 +332,21 @@ impl<'a> WaveFileIterator<'a> {
     (samples, cursor.position() as usize)
   }
 
+  fn next_float64(cursor: &mut Cursor<&[u8]>, channels: usize) -> (Frame, usize) {
+    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+
+    for _ in 0..channels {
+      match cursor.read_f64::<LittleEndian>() {
+        Ok(sample) => {
+          let scaled = (sample * 2147483647.0) as i32;
+          samples.push(scaled);
+        },
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    (samples, cursor.position() as usize)
+  }
 }
 
 #[test]
