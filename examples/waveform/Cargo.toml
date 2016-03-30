@@ -1,0 +1,12 @@
+[package]
+name = "waveform"
+version = "0.1.0"
+authors = ["John Ledbetter <john@throttle.io>"]
+license = "MIT"
+
+[dependencies]
+image = "*"
+wavefile = "*"
+argparse = "*"
+itertools = "*"
+
