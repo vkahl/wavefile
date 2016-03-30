@@ -1,6 +1,6 @@
 [package]
 name        = "wavefile"
-version     = "0.1.0"
+version     = "0.2.0"
 authors     = ["John Ledbetter <john@throttle.io>"]
 description = "Simple wavefile parser."
 keywords    = ["wav", "wavefile", "wavfile"]
