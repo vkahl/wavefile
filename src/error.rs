@@ -29,18 +29,15 @@ impl From<byteorder::Error> for WaveError {
 
 impl Error for WaveError {
   fn description(&self) -> &str {
-    match self {
-      &WaveError::ParseError(ref s)  => &s,
-      &WaveError::Unsupported(ref s) => &s,
-      &WaveError::IoError(ref e)     => e.description()
+    match *self {
+      WaveError::ParseError(ref s)  |
+      WaveError::Unsupported(ref s) => &s,
+      WaveError::IoError(ref e)     => e.description()
     }
   }
 
   fn cause(&self) -> Option<&Error> {
-    match self {
-      &WaveError::IoError(ref e) => Some(e),
-      _ => None
-    }
+    if let WaveError::IoError(ref e) = *self { Some(e) } else { None }
   }
 }
 
