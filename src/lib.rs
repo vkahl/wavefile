@@ -3,9 +3,11 @@ extern crate byteorder;
 
 pub mod error;
 pub mod speakers;
+pub mod formats;
 
 pub use self::error::WaveError;
 pub use self::speakers::SpeakerPosition;
+pub use self::formats::Format;
 
 use std::io::{Seek,SeekFrom,Cursor};
 use memmap::{Mmap,Protection};
@@ -18,17 +20,6 @@ const FMT_ : u32 = 0x20746d66;
 const DATA : u32 = 0x61746164;
 const LIST : u32 = 0x5453494c;
 const FACT : u32 = 0x74636166;
-
-const FORMAT_PCM  : u16 = 1;
-const FORMAT_IEEE : u16 = 3;
-const FORMAT_EXT  : u16 = 0xfffe;
-
-#[derive(Debug,Copy,Clone,PartialEq)]
-pub enum Format {
-  PCM       = FORMAT_PCM  as isize,
-  IEEEFloat = FORMAT_IEEE as isize,
-  Extended  = FORMAT_EXT  as isize
-}
 
 /// Contains information included in the wavefile's header section,
 /// describing the format, sample size, and number of audio channels
@@ -203,12 +194,11 @@ impl WaveFile {
       match chunk_id {
         FMT_ => {
           have_fmt = true;
-          self.info.audio_format = match try!(cursor.read_u16::<LittleEndian>()) {
-            FORMAT_PCM  => Format::PCM,
-            FORMAT_IEEE => Format::IEEEFloat,
-            FORMAT_EXT  => Format::Extended,
-            other       => {
-              let msg = format!("Unexpected format {0:x}", other);
+          let fmt = try!(cursor.read_u16::<LittleEndian>());
+          self.info.audio_format = match Format::decode(fmt) {
+            Some(f) => f,
+            None    => {
+              let msg = format!("Unexpected format {0:x}", fmt);
               return Err(WaveError::ParseError(msg));
             }
           };
@@ -224,11 +214,11 @@ impl WaveFile {
               22 => {
                 self.info.valid_bps    = Some(try!(cursor.read_u16::<LittleEndian>()));
                 self.info.channel_mask = Some(try!(cursor.read_u32::<LittleEndian>()));
-                self.info.subformat    = match try!(cursor.read_u16::<LittleEndian>()) {
-                  FORMAT_PCM  => Some(Format::PCM),
-                  FORMAT_IEEE => Some(Format::IEEEFloat),
-                  other       => {
-                    let msg = format!("Unexpected subformat {0:x}", other);
+                let subformat          = try!(cursor.read_u16::<LittleEndian>());
+                self.info.subformat    = match Format::decode(subformat) {
+                  Some(f) => Some(f),
+                  None    => {
+                    let msg = format!("Unexpected subformat {0:x}", subformat);
                     return Err(WaveError::ParseError(msg));
                   }
                 };
