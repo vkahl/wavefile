@@ -22,7 +22,7 @@ However, it's hard to find samples of some of these format so any feedback is ap
 let wav = match WaveFile::open("/home/john/test.wav") {
   Ok(w)  => w,
   Err(e) => println!("Oh no: {}", e)
-}
+};
 
 println!("{} Hz, {} channel(s), {} total samples", w.sample_rate(), w.channels(), w.len());
 
