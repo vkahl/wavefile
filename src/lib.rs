@@ -121,6 +121,11 @@ impl WaveFile {
     self.info.total_frames as usize
   }
 
+  /// The duration in milliseconds of the file.
+  pub fn duration(&self) -> usize {
+    self.len() * 1000 / self.sample_rate()
+  }
+
   pub fn bits_per_sample(&self) -> usize {
     self.info.bits_per_sample as usize
   }
@@ -427,4 +432,10 @@ fn test_float_extended() {
 
   assert_eq!(file.speakers().unwrap(),
              [SpeakerPosition::FrontLeft, SpeakerPosition::FrontRight]);
+}
+
+#[test]
+fn test_duration() {
+  let file = WaveFile::open("./fixtures/test-s24le.wav").unwrap();
+  assert_eq!(file.duration(), 10456);
 }
