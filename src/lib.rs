@@ -27,7 +27,7 @@ const FACT : u32 = 0x74636166;
 #[derive(Debug,Copy,Clone)]
 pub struct WaveInfo {
   /// Which encoding format this file uses.
-  /// If the format is `Format::Extended`, then the actual audio format is
+  /// If the format is `Format::Extensible`, then the actual audio format is
   /// instead determined by the `subformat` field.
   pub audio_format:    Format,
   /// Number of distinct audio channels.
@@ -41,9 +41,15 @@ pub struct WaveInfo {
   /// Number of frames present in the file.  Each frame contains one sample per
   /// channel.
   pub total_frames:    u32,
+  /// Only present for `Format::Extensible` files.  Gives the actual number of
+  /// valid bits per sample, which may be less than the value stored in
+  /// `bits_per_sample`.
   pub valid_bps:       Option<u16>,
+  /// Only present for `Format::Extensible` files.  Contains a bit mask
+  /// specifiying what speaker position to map each audio channel to.
+  /// See `speakers()` for a parsed representation.
   pub channel_mask:    Option<u32>,
-  /// For `Format::Extended` files, this field contains the actual audo encoding
+  /// For `Format::Extensible` files, this field contains the actual audo encoding
   /// of the file, either `Format::PCM` or `Format::IEEEFloat`.
   pub subformat:       Option<Format>
 }
@@ -131,7 +137,7 @@ impl WaveFile {
   }
 
   pub fn data_format(&self) -> Format {
-    if self.info.audio_format == Format::Extended {
+    if self.info.audio_format == Format::Extensible {
       self.info.subformat.unwrap()
     } else {
       self.info.audio_format
@@ -193,7 +199,7 @@ impl WaveFile {
     info.block_align     = try!(cursor.read_u16::<LittleEndian>());
     info.bits_per_sample = try!(cursor.read_u16::<LittleEndian>());
 
-    if info.audio_format == Format::Extended {
+    if info.audio_format == Format::Extensible {
       match try!(cursor.read_u16::<LittleEndian>()) {
         22 => {
           info.valid_bps    = Some(try!(cursor.read_u16::<LittleEndian>()));
@@ -415,11 +421,11 @@ fn test_iter() {
 
 
 #[test]
-fn test_float_extended() {
+fn test_float_extensible() {
   let file = WaveFile::open("./fixtures/test-f32le.wav").unwrap();
   let info = file.info();
 
-  assert_eq!(info.audio_format,  Format::Extended);
+  assert_eq!(info.audio_format,  Format::Extensible);
   assert_eq!(file.data_format(), Format::IEEEFloat);
   assert_eq!(file.len(),         501888);
 
