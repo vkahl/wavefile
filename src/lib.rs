@@ -58,8 +58,8 @@ pub struct WaveInfo {
 
 pub struct WaveFile {
   mmap:        Mmap,
-  data_offset: usize,
-  data_size:   usize,
+  data_offset: u64,
+  data_size:   u32,
   info:        WaveInfo
 }
 
@@ -67,10 +67,10 @@ pub struct WaveFile {
 /// wavefile.
 pub struct WaveFileIterator<'a> {
   file:             &'a WaveFile,
-  pos:              usize,
-  base:             usize,
-  end:              usize,
-  bytes_per_sample: usize,
+  pos:              u64,
+  base:             u64,
+  end:              u64,
+  bytes_per_sample: u16,
 }
 
 /// Represents a single frame of audio, containing one sample per audio channel.
@@ -114,28 +114,28 @@ impl WaveFile {
   }
 
   /// The number of audio channels in the file.
-  pub fn channels(&self) -> usize {
-    self.info.channels as usize
+  pub fn channels(&self) -> u16 {
+    self.info.channels
   }
 
   /// The number of samples present for one second of audio.
-  pub fn sample_rate(&self) -> usize {
-    self.info.sample_rate as usize
+  pub fn sample_rate(&self) -> u32 {
+    self.info.sample_rate
   }
 
   /// The total number of frames present in the file.
   /// Each frame will contain `channels()` number of samples.
-  pub fn len(&self) -> usize {
-    self.info.total_frames as usize
+  pub fn len(&self) -> u32 {
+    self.info.total_frames
   }
 
   /// The duration in milliseconds of the file.
-  pub fn duration(&self) -> usize {
+  pub fn duration(&self) -> u32 {
     self.len() * 1000 / self.sample_rate()
   }
 
-  pub fn bits_per_sample(&self) -> usize {
-    self.info.bits_per_sample as usize
+  pub fn bits_per_sample(&self) -> u16 {
+    self.info.bits_per_sample
   }
 
   pub fn data_format(&self) -> Format {
@@ -174,12 +174,12 @@ impl WaveFile {
   /// }
   /// ```
   pub fn iter(&self) -> WaveFileIterator {
-    let bytes_per_sample = self.info.bits_per_sample as usize / 8;
+    let bytes_per_sample = self.info.bits_per_sample / 8;
     WaveFileIterator {
       file:             &self,
       pos:              0,
       base:             self.data_offset,
-      end:              self.data_offset + self.data_size,
+      end:              self.data_offset + self.data_size as u64,
       bytes_per_sample: bytes_per_sample
     }
   }
@@ -250,7 +250,7 @@ impl WaveFile {
           have_fmt = true;
         },
         DATA  => {
-          self.data_size = chunk_size as usize;
+          self.data_size = chunk_size;
           break;
         },
         LIST  => { try!(cursor.seek(SeekFrom::Current(chunk_size as i64))); },
@@ -269,7 +269,7 @@ impl WaveFile {
     try!(self.validate_format());
 
     self.info.total_frames = self.data_size as u32 / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
-    self.data_offset = cursor.position() as usize;
+    self.data_offset = cursor.position();
 
     Ok(())
   }
@@ -299,11 +299,11 @@ impl<'a> Iterator for WaveFileIterator<'a> {
   fn next(&mut self) -> Option<Self::Item> {
     let mut cursor = Cursor::new(unsafe { self.file.mmap.as_slice() });
 
-    if cursor.seek(SeekFrom::Start((self.base + self.pos) as u64)).is_err() {
+    if cursor.seek(SeekFrom::Start(self.base + self.pos)).is_err() {
       return None;
     };
 
-    if cursor.position() as usize == self.end {
+    if cursor.position() == self.end {
       return None;
     }
 
@@ -325,20 +325,20 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 }
 
 impl<'a> WaveFileIterator<'a> {
-  fn next_pcm(cursor: &mut Cursor<&[u8]>, channels: usize, bps: usize) -> (Frame, usize) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+  fn next_pcm(cursor: &mut Cursor<&[u8]>, channels: u16, bps: u16) -> (Frame, u64) {
+    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(bps) {
+      match cursor.read_int::<LittleEndian>(bps as usize) {
         Ok(sample) => samples.push(sample as i32),
         Err(e)     => { panic!("{:?}", e); }
       }
     }
 
-    (samples, cursor.position() as usize)
+    (samples, cursor.position())
   }
 
-  fn next_float(cursor: &mut Cursor<&[u8]>, channels: usize, bps: usize) -> (Frame, usize) {
+  fn next_float(cursor: &mut Cursor<&[u8]>, channels: u16, bps: u16) -> (Frame, u64) {
     match bps {
       4 => WaveFileIterator::next_float32(cursor, channels),
       8 => WaveFileIterator::next_float64(cursor, channels),
@@ -346,8 +346,8 @@ impl<'a> WaveFileIterator<'a> {
     }
   }
 
-  fn next_float32(cursor: &mut Cursor<&[u8]>, channels: usize) -> (Frame, usize) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+  fn next_float32(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
       match cursor.read_f32::<LittleEndian>() {
@@ -359,11 +359,11 @@ impl<'a> WaveFileIterator<'a> {
       }
     }
 
-    (samples, cursor.position() as usize)
+    (samples, cursor.position())
   }
 
-  fn next_float64(cursor: &mut Cursor<&[u8]>, channels: usize) -> (Frame, usize) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels);
+  fn next_float64(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
       match cursor.read_f64::<LittleEndian>() {
@@ -375,7 +375,7 @@ impl<'a> WaveFileIterator<'a> {
       }
     }
 
-    (samples, cursor.position() as usize)
+    (samples, cursor.position())
   }
 }
 
