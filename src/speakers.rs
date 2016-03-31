@@ -1,5 +1,5 @@
 
-const SPEAKER_FRONT_LEFT            : isize = (1 << 0);
+const SPEAKER_FRONT_LEFT            : isize =  1;
 const SPEAKER_FRONT_RIGHT           : isize = (1 << 1);
 const SPEAKER_FRONT_CENTER          : isize = (1 << 2);
 const SPEAKER_LOW_FREQUENCY         : isize = (1 << 3);
