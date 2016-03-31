@@ -299,7 +299,7 @@ impl<'a> Iterator for WaveFileIterator<'a> {
   fn next(&mut self) -> Option<Self::Item> {
     let mut cursor = Cursor::new(unsafe { self.file.mmap.as_slice() });
 
-    if let Err(_) = cursor.seek(SeekFrom::Start((self.base + self.pos) as u64)) {
+    if cursor.seek(SeekFrom::Start((self.base + self.pos) as u64)).is_err() {
       return None;
     };
 
