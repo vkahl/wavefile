@@ -100,7 +100,7 @@ impl WaveFile {
     };
     let mut file = WaveFile { mmap: mmap, data_offset: 0, data_size: 0, info: info };
 
-    try!(file.read_header_chunks());
+    try!(file.read_chunks());
 
     Ok(file)
   }
@@ -176,11 +176,52 @@ impl WaveFile {
     }
   }
 
-  fn read_header_chunks(&mut self) -> Result<(), WaveError> {
+  fn read_format_chunk(info: &mut WaveInfo, cursor: &mut Cursor<&[u8]>) -> Result<(), WaveError> {
+    let fmt = try!(cursor.read_u16::<LittleEndian>());
+
+    info.audio_format = match Format::decode(fmt) {
+      Some(f) => f,
+      None    => {
+        let msg = format!("Unexpected format {0:x}", fmt);
+        return Err(WaveError::ParseError(msg));
+      }
+    };
+
+    info.channels        = try!(cursor.read_u16::<LittleEndian>());
+    info.sample_rate     = try!(cursor.read_u32::<LittleEndian>());
+    info.byte_rate       = try!(cursor.read_u32::<LittleEndian>());
+    info.block_align     = try!(cursor.read_u16::<LittleEndian>());
+    info.bits_per_sample = try!(cursor.read_u16::<LittleEndian>());
+
+    if info.audio_format == Format::Extended {
+      match try!(cursor.read_u16::<LittleEndian>()) {
+        22 => {
+          info.valid_bps    = Some(try!(cursor.read_u16::<LittleEndian>()));
+          info.channel_mask = Some(try!(cursor.read_u32::<LittleEndian>()));
+          let subformat          = try!(cursor.read_u16::<LittleEndian>());
+          info.subformat    = match Format::decode(subformat) {
+            Some(f) => Some(f),
+            None    => {
+              let msg = format!("Unexpected subformat {0:x}", subformat);
+              return Err(WaveError::ParseError(msg));
+            }
+          };
+          try!(cursor.seek(SeekFrom::Current(14)));
+        },
+        x => {
+          let msg = format!("Unexpected extension size: {}", x);
+          return Err(WaveError::ParseError(msg));
+        }
+      }
+    }
+
+    Ok(())
+  }
+
+  fn read_chunks(&mut self) -> Result<(), WaveError> {
     let mut cursor   = Cursor::new(unsafe { self.mmap.as_slice() } );
     let mut have_fmt = false;
     let mut chunk_id = try!(cursor.read_u32::<LittleEndian>());
-
     let mut chunk_size : u32;
 
     try!(cursor.read_u32::<LittleEndian>());
@@ -198,44 +239,8 @@ impl WaveFile {
 
       match chunk_id {
         FMT_ => {
+          try!(WaveFile::read_format_chunk(&mut self.info, &mut cursor));
           have_fmt = true;
-          let fmt = try!(cursor.read_u16::<LittleEndian>());
-          self.info.audio_format = match Format::decode(fmt) {
-            Some(f) => f,
-            None    => {
-              let msg = format!("Unexpected format {0:x}", fmt);
-              return Err(WaveError::ParseError(msg));
-            }
-          };
-          self.info.channels        = try!(cursor.read_u16::<LittleEndian>());
-          self.info.sample_rate     = try!(cursor.read_u32::<LittleEndian>());
-          self.info.byte_rate       = try!(cursor.read_u32::<LittleEndian>());
-          self.info.block_align     = try!(cursor.read_u16::<LittleEndian>());
-          self.info.bits_per_sample = try!(cursor.read_u16::<LittleEndian>());
-
-          if self.info.audio_format == Format::Extended {
-            match try!(cursor.read_u16::<LittleEndian>()) {
-              0 => { },
-              22 => {
-                self.info.valid_bps    = Some(try!(cursor.read_u16::<LittleEndian>()));
-                self.info.channel_mask = Some(try!(cursor.read_u32::<LittleEndian>()));
-                let subformat          = try!(cursor.read_u16::<LittleEndian>());
-                self.info.subformat    = match Format::decode(subformat) {
-                  Some(f) => Some(f),
-                  None    => {
-                    let msg = format!("Unexpected subformat {0:x}", subformat);
-                    return Err(WaveError::ParseError(msg));
-                  }
-                };
-                try!(cursor.seek(SeekFrom::Current(14)));
-              },
-              x => {
-                let msg = format!("Unexpected extension size: {}", x);
-                return Err(WaveError::ParseError(msg));
-              }
-            }
-
-          }
         },
         DATA  => {
           self.data_size = chunk_size as usize;

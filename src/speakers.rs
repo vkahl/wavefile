@@ -17,7 +17,6 @@ const SPEAKER_TOP_FRONT_RIGHT       : isize = (1 << 14);
 const SPEAKER_TOP_BACK_LEFT         : isize = (1 << 15);
 const SPEAKER_TOP_BACK_CENTER       : isize = (1 << 16);
 const SPEAKER_TOP_BACK_RIGHT        : isize = (1 << 17);
-const SPEAKER_RESERVED              : isize = (1 << 31);
 
 #[derive(Debug,Copy,Clone,PartialEq)]
 pub enum SpeakerPosition {
@@ -38,8 +37,7 @@ pub enum SpeakerPosition {
   TopFrontRight      = SPEAKER_TOP_FRONT_RIGHT,
   TopBackLeft        = SPEAKER_TOP_BACK_LEFT,
   TopBackCenter      = SPEAKER_TOP_BACK_CENTER,
-  TopBackRight       = SPEAKER_TOP_BACK_RIGHT,
-  Reserved           = SPEAKER_RESERVED,
+  TopBackRight       = SPEAKER_TOP_BACK_RIGHT
 }
 
 impl SpeakerPosition {
@@ -47,7 +45,7 @@ impl SpeakerPosition {
     let mut speakers = Vec::with_capacity(8);
     let mut i = SPEAKER_FRONT_LEFT;
 
-    while i < SPEAKER_RESERVED {
+    while i <= SPEAKER_TOP_BACK_RIGHT {
       if bits & i != 0 {
         speakers.push(match i {
           SPEAKER_FRONT_LEFT            => SpeakerPosition::FrontLeft,
