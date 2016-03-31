@@ -34,7 +34,9 @@ pub struct WaveInfo {
   pub channels:        u16,
   /// Number of audio samples per second.
   pub sample_rate:     u32,
+  /// Number of bytes per second of audio.
   pub byte_rate:       u32,
+  /// Number of bytes for one frame of audio.
   pub block_align:     u16,
   /// Number of bits used to represent each sample.
   pub bits_per_sample: u16,
@@ -238,7 +240,6 @@ impl WaveFile {
       return Err(WaveError::ParseError("Not a Wavefile".into()));
     }
 
-
     loop {
       chunk_id   = try!(cursor.read_u32::<LittleEndian>());
       chunk_size = try!(cursor.read_u32::<LittleEndian>());
@@ -262,20 +263,33 @@ impl WaveFile {
     }
 
     if !have_fmt {
-      return Err(WaveError::ParseError("Format Chunk not found".into()));
+      return Err(WaveError::ParseError("No format chunk found".into()));
     }
 
-    if self.info.channels == 0 || self.info.bits_per_sample < 8 {
-      let msg = format!("Invalid channel count {} or bits per sample {} value",
-                        self.info.channels, self.info.bits_per_sample);
-
-      return Err(WaveError::ParseError(msg));
-    }
+    try!(self.validate_format());
 
     self.info.total_frames = self.data_size as u32 / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
-
     self.data_offset = cursor.position() as usize;
+
     Ok(())
+  }
+
+  fn validate_format(&self) -> Result<(), WaveError> {
+    let bps = self.info.bits_per_sample;
+
+    if self.info.channels == 0 {
+      let msg = format!("No audio channels present in this file (weird, right?)");
+      Err(WaveError::ParseError(msg))
+    }
+    else if self.info.bits_per_sample < 8 {
+      let msg = format!("Unsupported bits per sample: {} expected at least 8.", bps);
+      Err(WaveError::Unsupported(msg))
+    } else if self.data_format() == Format::IEEEFloat && !(bps == 32 || bps == 64) {
+      let msg = format!("Unsupported bits per sample for floating point data: {} expected 32/64.", bps);
+      Err(WaveError::Unsupported(msg))
+    } else {
+      Ok(())
+    }
   }
 }
 
@@ -328,7 +342,7 @@ impl<'a> WaveFileIterator<'a> {
     match bps {
       4 => WaveFileIterator::next_float32(cursor, channels),
       8 => WaveFileIterator::next_float64(cursor, channels),
-      _ => panic!("Can't handle the specified float bytes per sample")
+      _ => unreachable!()
     }
   }
 
