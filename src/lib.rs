@@ -307,6 +307,14 @@ impl<'a> Iterator for WaveFileIterator<'a> {
       return None;
     }
 
+    // TODO: if the data is in PCM format, we return the original values.
+    // For example, pcm_8 yields values in the range [0, 255], while
+    // pcm_16 yields values from [-32767, 32767].
+    // However, for float data, since we can't return a float value here,
+    // We convert the result to the full range of an i32.
+    // Ideally we should let the caller specify what range they want the
+    // data scaled to, if any;  however, I don't know how to do this without
+    // writing out a million different conversion functions for each case.
     let (frame, new_pos) = match self.file.data_format() {
       Format::PCM => WaveFileIterator::next_pcm(&mut cursor,
                                                 self.file.channels(),
