@@ -2,8 +2,6 @@ use std::io;
 use std::fmt::{self,Display};
 use std::error::Error;
 
-use byteorder;
-
 #[derive(Debug)]
 pub enum WaveError {
   IoError(io::Error),
@@ -15,15 +13,6 @@ pub enum WaveError {
 impl From<io::Error> for WaveError {
   fn from(e: io::Error) -> Self {
     WaveError::IoError(e)
-  }
-}
-
-impl From<byteorder::Error> for WaveError {
-  fn from(e: byteorder::Error) -> Self {
-    match e {
-      byteorder::Error::UnexpectedEOF => WaveError::ParseError("Unexpected EOF".into()),
-      byteorder::Error::Io(e) => WaveError::IoError(e)
-    }
   }
 }
 
