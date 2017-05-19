@@ -59,7 +59,7 @@ fn main() {
   // we want to divide the frames in the wavefile into chunks,
   // so that we have one chunk per horizontal pixel in the output image.
   let chunk_size = wav.len() / args.dimensions.0 as usize;
-  let chunks = &wav.iter().chunks_lazy(chunk_size);
+  let chunks = &wav.iter().chunks(chunk_size);
 
   // here we compute the height of the waveform for each chunk, using the max
   // absolute value found in the chunk of frames (from any channel).
