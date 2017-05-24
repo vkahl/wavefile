@@ -93,7 +93,7 @@ impl WaveFile {
   /// ```
   pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WaveError> {
     let filename = path.into();
-    let mmap = try!(Mmap::open_path(filename, Protection::Read));
+    let mmap = Mmap::open_path(filename, Protection::Read)?;
     let info = WaveInfo {
       audio_format:    Format::PCM,
       channels:        0,
@@ -108,7 +108,7 @@ impl WaveFile {
     };
     let mut file = WaveFile { mmap: mmap, data_offset: 0, data_size: 0, info: info };
 
-    try!(file.read_chunks());
+    file.read_chunks()?;
 
     Ok(file)
   }
@@ -185,7 +185,7 @@ impl WaveFile {
   }
 
   fn read_format_chunk(info: &mut WaveInfo, cursor: &mut Cursor<&[u8]>) -> Result<(), WaveError> {
-    let fmt = try!(cursor.read_u16::<LittleEndian>());
+    let fmt = cursor.read_u16::<LittleEndian>()?;
 
     info.audio_format = match Format::decode(fmt) {
       Some(f) => f,
@@ -195,18 +195,18 @@ impl WaveFile {
       }
     };
 
-    info.channels        = try!(cursor.read_u16::<LittleEndian>());
-    info.sample_rate     = try!(cursor.read_u32::<LittleEndian>());
-    info.byte_rate       = try!(cursor.read_u32::<LittleEndian>());
-    info.block_align     = try!(cursor.read_u16::<LittleEndian>());
-    info.bits_per_sample = try!(cursor.read_u16::<LittleEndian>());
+    info.channels        = cursor.read_u16::<LittleEndian>()?;
+    info.sample_rate     = cursor.read_u32::<LittleEndian>()?;
+    info.byte_rate       = cursor.read_u32::<LittleEndian>()?;
+    info.block_align     = cursor.read_u16::<LittleEndian>()?;
+    info.bits_per_sample = cursor.read_u16::<LittleEndian>()?;
 
     if info.audio_format == Format::Extensible {
-      match try!(cursor.read_u16::<LittleEndian>()) {
+      match cursor.read_u16::<LittleEndian>()? {
         22 => {
-          info.valid_bps    = Some(try!(cursor.read_u16::<LittleEndian>()));
-          info.channel_mask = Some(try!(cursor.read_u32::<LittleEndian>()));
-          let subformat          = try!(cursor.read_u16::<LittleEndian>());
+          info.valid_bps    = Some(cursor.read_u16::<LittleEndian>()?);
+          info.channel_mask = Some(cursor.read_u32::<LittleEndian>()?);
+          let subformat          = cursor.read_u16::<LittleEndian>()?;
           info.subformat    = match Format::decode(subformat) {
             Some(f) => Some(f),
             None    => {
@@ -214,7 +214,7 @@ impl WaveFile {
               return Err(WaveError::ParseError(msg));
             }
           };
-          try!(cursor.seek(SeekFrom::Current(14)));
+          cursor.seek(SeekFrom::Current(14))?;
         },
         x => {
           let msg = format!("Unexpected extension size: {}", x);
@@ -229,32 +229,32 @@ impl WaveFile {
   fn read_chunks(&mut self) -> Result<(), WaveError> {
     let mut cursor   = Cursor::new(unsafe { self.mmap.as_slice() } );
     let mut have_fmt = false;
-    let mut chunk_id = try!(cursor.read_u32::<LittleEndian>());
+    let mut chunk_id = cursor.read_u32::<LittleEndian>()?;
     let mut chunk_size : u32;
 
-    try!(cursor.read_u32::<LittleEndian>());
+    cursor.read_u32::<LittleEndian>()?;
 
-    let riff_type = try!(cursor.read_u32::<LittleEndian>());
+    let riff_type = cursor.read_u32::<LittleEndian>()?;
 
     if chunk_id != RIFF || riff_type != WAVE {
       return Err(WaveError::ParseError("Not a Wavefile".into()));
     }
 
     loop {
-      chunk_id   = try!(cursor.read_u32::<LittleEndian>());
-      chunk_size = try!(cursor.read_u32::<LittleEndian>());
+      chunk_id   = cursor.read_u32::<LittleEndian>()?;
+      chunk_size = cursor.read_u32::<LittleEndian>()?;
 
       match chunk_id {
         FMT_ => {
-          try!(WaveFile::read_format_chunk(&mut self.info, &mut cursor));
+          WaveFile::read_format_chunk(&mut self.info, &mut cursor)?;
           have_fmt = true;
         },
         DATA  => {
           self.data_size = chunk_size;
           break;
         },
-        LIST  => { try!(cursor.seek(SeekFrom::Current(chunk_size as i64))); },
-        FACT  => { try!(cursor.seek(SeekFrom::Current(chunk_size as i64))); },
+        LIST  => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
+        FACT  => { cursor.seek(SeekFrom::Current(chunk_size as i64))?; },
         other => {
           let msg = format!("Unexpected Chunk ID {0:x}", other);
           return Err(WaveError::ParseError(msg));
@@ -266,7 +266,7 @@ impl WaveFile {
       return Err(WaveError::ParseError("No format chunk found".into()));
     }
 
-    try!(self.validate_format());
+    self.validate_format()?;
 
     self.info.total_frames = self.data_size as u32 / (self.info.channels as u32 * self.info.bits_per_sample as u32 / 8 );
     self.data_offset = cursor.position();
