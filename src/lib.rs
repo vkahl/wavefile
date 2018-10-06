@@ -125,13 +125,13 @@ impl WaveFile {
 
   /// The total number of frames present in the file.
   /// Each frame will contain `channels()` number of samples.
-  pub fn len(&self) -> u32 {
-    self.info.total_frames
+  pub fn len(&self) -> usize {
+    self.info.total_frames as usize
   }
 
   /// The duration in milliseconds of the file.
   pub fn duration(&self) -> u32 {
-    self.len() * 1000 / self.sample_rate()
+    self.len() as u32 * 1000 / self.sample_rate()
   }
 
   pub fn bits_per_sample(&self) -> u16 {
@@ -335,11 +335,25 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 impl<'a> WaveFileIterator<'a> {
   fn next_pcm(cursor: &mut Cursor<&[u8]>, channels: u16, bps: u16) -> (Frame, u64) {
     match bps {
+      1 => Self::next_pcm8(cursor, channels),
       2 => Self::next_pcm16(cursor, channels),
       3 => Self::next_pcm24(cursor, channels),
       4 => Self::next_pcm32(cursor, channels),
       _ => unreachable!(),
     }
+  }
+
+  fn next_pcm8(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
+
+    for _ in 0..channels {
+      match cursor.read_int::<LittleEndian>(2) {
+        Ok(sample) => samples.push(sample as f32 / 128.0),
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    (samples, cursor.position())
   }
 
   fn next_pcm16(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {

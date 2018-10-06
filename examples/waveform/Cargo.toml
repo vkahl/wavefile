@@ -1,12 +1,11 @@
 [package]
 name = "waveform"
 version = "0.1.0"
-authors = ["John Ledbetter <john@throttle.io>"]
+authors = ["John Ledbetter <john@throttle.io>", "Valentin Kahl <git@valentin-kahl.de>"]
 license = "MIT"
 
 [dependencies]
-image = "*"
-wavefile = "*"
-argparse = "*"
-itertools = "*"
-
+wavefile = { git = "https://github.com/vkahl/wavefile" }
+image = "0.20"
+argparse = "0.2"
+itertools = "0.7"
