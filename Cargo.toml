@@ -1,6 +1,6 @@
 [package]
 name        = "wavefile"
-version     = "0.2.0"
+version     = "0.2.1"
 authors     = ["John Ledbetter <john@throttle.io>"]
 description = "Simple wavefile parser."
 keywords    = ["wav", "wavefile", "wavfile"]
@@ -10,5 +10,5 @@ homepage    = "https://github.com/ledbettj/wavefile.git"
 exclude     = [ "fixtures/*" ]
 
 [dependencies]
-byteorder = "1.0"
+byteorder = "1.2"
 memmap    = "0.5"

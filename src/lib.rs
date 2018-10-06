@@ -316,17 +316,20 @@ impl<'a> Iterator for WaveFileIterator<'a> {
     // data scaled to, if any;  however, I don't know how to do this without
     // writing out a million different conversion functions for each case.
     let (frame, new_pos) = match self.file.data_format() {
-      Format::PCM => WaveFileIterator::next_pcm(&mut cursor,
-                                                self.file.channels(),
-                                                self.bytes_per_sample),
-      Format::IEEEFloat => WaveFileIterator::next_float(&mut cursor,
-                                                        self.file.channels(),
-                                                        self.bytes_per_sample),
+      Format::PCM => WaveFileIterator::next_pcm(
+        &mut cursor,
+        self.file.channels(),
+        self.bytes_per_sample
+      ),
+      Format::IEEEFloat => WaveFileIterator::next_float(
+        &mut cursor,
+        self.file.channels(),
+        self.bytes_per_sample
+      ),
       _ => unreachable!()
     };
 
     self.pos = new_pos - self.base;
-
 
     Some(frame)
   }
@@ -347,8 +350,8 @@ impl<'a> WaveFileIterator<'a> {
     let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(2) {
-        Ok(sample) => samples.push(sample as f32 / 128.0),
+      match cursor.read_u8() {
+        Ok(sample) => samples.push((sample as f32 - 128.0) / 128.0),
         Err(e)     => { panic!("{:?}", e); }
       }
     }
@@ -360,7 +363,7 @@ impl<'a> WaveFileIterator<'a> {
     let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(2) {
+      match cursor.read_i16::<LittleEndian>() {
         Ok(sample) => samples.push(sample as f32 / 32768.0),
         Err(e)     => { panic!("{:?}", e); }
       }
@@ -373,7 +376,7 @@ impl<'a> WaveFileIterator<'a> {
     let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(3) {
+      match cursor.read_i24::<LittleEndian>() {
         Ok(sample) => samples.push(sample as f32 / 8388608.0),
         Err(e)     => { panic!("{:?}", e); }
       }
@@ -386,7 +389,7 @@ impl<'a> WaveFileIterator<'a> {
     let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(4) {
+      match cursor.read_i32::<LittleEndian>() {
         Ok(sample) => samples.push(sample as f32 / 2147483648.0),
         Err(e)     => { panic!("{:?}", e); }
       }

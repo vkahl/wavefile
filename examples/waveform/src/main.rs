@@ -88,7 +88,7 @@ fn main() {
   // we'll scale everything by half the image height,
   // so that the edges of the image represent a level of 0dBFS.
   let mid        = args.dimensions.1 / 2;
-  let scale      = args.dimensions.1 as f32 / 2.0;
+  let scale      = mid as f32;
 
   // a beautiful solid red.
   let color      = Rgba::from_channels(255u8, 0u8, 0u8, 255u8);
