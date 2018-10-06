@@ -76,7 +76,7 @@ pub struct WaveFileIterator<'a> {
 /// Represents a single frame of audio, containing one sample per audio channel.
 /// For example, a mono audio file will contain only one sample; a stereo file
 /// will contain two.
-pub type Frame = Vec<i32>;
+pub type Frame = Vec<f32>;
 
 impl WaveFile {
   /// Constructs a new `WaveFile`.
@@ -334,11 +334,46 @@ impl<'a> Iterator for WaveFileIterator<'a> {
 
 impl<'a> WaveFileIterator<'a> {
   fn next_pcm(cursor: &mut Cursor<&[u8]>, channels: u16, bps: u16) -> (Frame, u64) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
+    match bps {
+      2 => Self::next_pcm16(cursor, channels),
+      3 => Self::next_pcm24(cursor, channels),
+      4 => Self::next_pcm32(cursor, channels),
+      _ => unreachable!(),
+    }
+  }
+
+  fn next_pcm16(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
-      match cursor.read_int::<LittleEndian>(bps as usize) {
-        Ok(sample) => samples.push(sample as i32),
+      match cursor.read_int::<LittleEndian>(2) {
+        Ok(sample) => samples.push(sample as f32 / 32768.0),
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    (samples, cursor.position())
+  }
+
+  fn next_pcm24(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
+
+    for _ in 0..channels {
+      match cursor.read_int::<LittleEndian>(3) {
+        Ok(sample) => samples.push(sample as f32 / 8388608.0),
+        Err(e)     => { panic!("{:?}", e); }
+      }
+    }
+
+    (samples, cursor.position())
+  }
+
+  fn next_pcm32(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
+
+    for _ in 0..channels {
+      match cursor.read_int::<LittleEndian>(4) {
+        Ok(sample) => samples.push(sample as f32 / 2147483648.0),
         Err(e)     => { panic!("{:?}", e); }
       }
     }
@@ -348,20 +383,19 @@ impl<'a> WaveFileIterator<'a> {
 
   fn next_float(cursor: &mut Cursor<&[u8]>, channels: u16, bps: u16) -> (Frame, u64) {
     match bps {
-      4 => WaveFileIterator::next_float32(cursor, channels),
-      8 => WaveFileIterator::next_float64(cursor, channels),
-      _ => unreachable!()
+      4 => Self::next_float32(cursor, channels),
+      8 => Self::next_float64(cursor, channels),
+      _ => unreachable!(),
     }
   }
 
   fn next_float32(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
       match cursor.read_f32::<LittleEndian>() {
         Ok(sample) => {
-          let scaled = (sample * 2147483647.0) as i32;
-          samples.push(scaled);
+          samples.push(sample as f32);
         },
         Err(e)     => { panic!("{:?}", e); }
       }
@@ -371,13 +405,12 @@ impl<'a> WaveFileIterator<'a> {
   }
 
   fn next_float64(cursor: &mut Cursor<&[u8]>, channels: u16) -> (Frame, u64) {
-    let mut samples : Vec<i32> = Vec::with_capacity(channels as usize);
+    let mut samples : Vec<f32> = Vec::with_capacity(channels as usize);
 
     for _ in 0..channels {
       match cursor.read_f64::<LittleEndian>() {
         Ok(sample) => {
-          let scaled = (sample * 2147483647.0) as i32;
-          samples.push(scaled);
+          samples.push(sample as f32);
         },
         Err(e)     => { panic!("{:?}", e); }
       }
@@ -427,8 +460,8 @@ fn test_iter() {
 
   let frames = file.iter().take(2).collect::<Vec<_>>();
   let expected = vec![
-    [19581, 19581],
-    [24337, 24337]
+    [0.002334237, 0.002334237],
+    [0.0029011965, 0.0029011965]
   ];
 
   for i in 0..expected.len() {
@@ -436,7 +469,7 @@ fn test_iter() {
   }
 
   let frame = file.iter().last().unwrap();
-  let expected = [244, 244];
+  let expected = [2.9087067e-05, 2.9087067e-05];
 
   assert_eq!(frame, expected)
 }
@@ -452,11 +485,9 @@ fn test_float_extensible() {
   assert_eq!(file.len(),         501888);
 
   let frames = file.iter().take(2).collect::<Vec<_>>();
-  // these are the same values as the 24-bit samples,
-  // however we've scaled to 32-bit.
   let expected = vec![
-    [5012736, 5012736],
-    [6230272, 6230272]
+    [0.002334237, 0.002334237],
+    [0.0029011965, 0.0029011965]
   ];
 
   for i in 0..expected.len() {
