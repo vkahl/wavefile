@@ -10,7 +10,8 @@ pub use self::speakers::SpeakerPosition;
 pub use self::formats::Format;
 
 use std::io::{Seek,SeekFrom,Cursor};
-use memmap::{Mmap,Protection};
+use std::fs::File;
+use memmap::Mmap;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -93,7 +94,8 @@ impl WaveFile {
   /// ```
   pub fn open<S: Into<String>>(path: S) -> Result<WaveFile, WaveError> {
     let filename = path.into();
-    let mmap = Mmap::open_path(filename, Protection::Read)?;
+    let file = File::open(filename)?;
+    let mmap = unsafe { Mmap::map(&file)? };
     let info = WaveInfo {
       audio_format:    Format::PCM,
       channels:        0,
@@ -227,7 +229,7 @@ impl WaveFile {
   }
 
   fn read_chunks(&mut self) -> Result<(), WaveError> {
-    let mut cursor   = Cursor::new(unsafe { self.mmap.as_slice() } );
+    let mut cursor   = Cursor::new(self.mmap.as_ref());
     let mut have_fmt = false;
     let mut chunk_id = cursor.read_u32::<LittleEndian>()?;
     let mut chunk_size : u32;
@@ -297,7 +299,7 @@ impl<'a> Iterator for WaveFileIterator<'a> {
   type Item = Frame;
 
   fn next(&mut self) -> Option<Self::Item> {
-    let mut cursor = Cursor::new(unsafe { self.file.mmap.as_slice() });
+    let mut cursor = Cursor::new(self.file.mmap.as_ref());
 
     if cursor.seek(SeekFrom::Start(self.base + self.pos)).is_err() {
       return None;
